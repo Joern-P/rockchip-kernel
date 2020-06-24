@@ -34,6 +34,7 @@
 #include <linux/component.h>
 #include <linux/regmap.h>
 #include <linux/mfd/syscon.h>
+#include <linux/overflow.h>
 
 #include <linux/reset.h>
 #include <linux/delay.h>
@@ -71,8 +72,8 @@
 #define VOP_INTR_SUPPORT(vop, name) \
 		VOP_REG_SUPPORT(vop, vop->data->intr->name)
 
-#define __REG_SET(x, off, mask, shift, v, write_mask, relaxed) \
-		vop_mask_write(x, off, mask, shift, v, write_mask, relaxed)
+#define __REG_SET(vop, off, mask, shift, v, write_mask, relaxed) \
+		vop_mask_write(vop, off, mask, shift, v, write_mask, relaxed)
 
 #define _REG_SET(vop, name, off, reg, mask, v, relaxed) \
 	do { \
@@ -83,22 +84,22 @@
 			dev_dbg(vop->dev, "Warning: not support "#name"\n"); \
 	} while(0)
 
-#define REG_SET(x, name, off, reg, v, relaxed) \
-		_REG_SET(x, name, off, reg, reg.mask, v, relaxed)
-#define REG_SET_MASK(x, name, off, reg, mask, v, relaxed) \
-		_REG_SET(x, name, off, reg, reg.mask & mask, v, relaxed)
+#define REG_SET(vop, name, off, reg, v, relaxed) \
+		_REG_SET(vop, name, off, reg, reg.mask, v, relaxed)
+#define REG_SET_MASK(vop, name, off, reg, mask, v, relaxed) \
+		_REG_SET(vop, name, off, reg, reg.mask & mask, v, relaxed)
 
-#define VOP_WIN_SET(x, win, name, v) \
-		REG_SET(x, name, win->offset, VOP_WIN_NAME(win, name), v, true)
-#define VOP_WIN_SET_EXT(x, win, ext, name, v) \
-		REG_SET(x, name, 0, win->ext->name, v, true)
-#define VOP_SCL_SET(x, win, name, v) \
-		REG_SET(x, name, win->offset, win->phy->scl->name, v, true)
-#define VOP_SCL_SET_EXT(x, win, name, v) \
-		REG_SET(x, name, win->offset, win->phy->scl->ext->name, v, true)
+#define VOP_WIN_SET(vop, win, name, v) \
+		REG_SET(vop, name, win->offset, VOP_WIN_NAME(win, name), v, true)
+#define VOP_WIN_SET_EXT(vop, win, ext, name, v) \
+		REG_SET(vop, name, 0, win->ext->name, v, true)
+#define VOP_SCL_SET(vop, win, name, v) \
+		REG_SET(vop, name, win->offset, win->phy->scl->name, v, true)
+#define VOP_SCL_SET_EXT(vop, win, name, v) \
+		REG_SET(vop, name, win->offset, win->phy->scl->ext->name, v, true)
 
-#define VOP_CTRL_SET(x, name, v) \
-		REG_SET(x, name, 0, (x)->data->ctrl->name, v, false)
+#define VOP_CTRL_SET(vop, name, v) \
+		REG_SET(vop, name, 0, (vop)->data->ctrl->name, v, false)
 
 #define VOP_INTR_GET(vop, name) \
 		vop_read_reg(vop, 0, &vop->data->ctrl->name)
@@ -124,11 +125,11 @@
 #define VOP_INTR_GET_TYPE(vop, name, type) \
 		vop_get_intr_type(vop, &vop->data->intr->name, type)
 
-#define VOP_CTRL_GET(x, name) \
-		vop_read_reg(x, 0, &vop->data->ctrl->name)
+#define VOP_CTRL_GET(vop, name) \
+		vop_read_reg(vop, 0, &vop->data->ctrl->name)
 
-#define VOP_WIN_GET(x, win, name) \
-		vop_read_reg(x, win->offset, &VOP_WIN_NAME(win, name))
+#define VOP_WIN_GET(vop, win, name) \
+		vop_read_reg(vop, win->offset, &VOP_WIN_NAME(win, name))
 
 #define VOP_WIN_NAME(win, name) \
 		(vop_get_win_phy(win, &win->phy->name)->name)
@@ -4072,15 +4073,14 @@ static void vop_handle_vblank(struct vop *vop)
 {
 	struct drm_device *drm = vop->drm_dev;
 	struct drm_crtc *crtc = &vop->crtc;
-	unsigned long flags;
 
-	spin_lock_irqsave(&drm->event_lock, flags);
+	spin_lock(&drm->event_lock);
 	if (vop->event) {
 		drm_crtc_send_vblank_event(crtc, vop->event);
 		drm_crtc_vblank_put(crtc);
 		vop->event = NULL;
 	}
-	spin_unlock_irqrestore(&drm->event_lock, flags);
+	spin_unlock(&drm->event_lock);
 
 	if (test_and_clear_bit(VOP_PENDING_FB_UNREF, &vop->pending))
 		drm_flip_work_commit(&vop->fb_unref_work, system_unbound_wq);
@@ -4110,14 +4110,14 @@ static irqreturn_t vop_isr(int irq, void *data)
 	 * interrupt register has interrupt status, enable and clear bits, we
 	 * must hold irq_lock to avoid a race with enable/disable_vblank().
 	*/
-	spin_lock_irqsave(&vop->irq_lock, flags); // spin_lock(&vop->irq_lock);
+	spin_lock(&vop->irq_lock);
 
 	active_irqs = VOP_INTR_GET_TYPE(vop, status, INTR_MASK);
 	/* Clear all active interrupt sources */
 	if (active_irqs)
 		VOP_INTR_SET_TYPE(vop, clear, active_irqs, 1);
 
-	spin_unlock_irqrestore(&vop->irq_lock, flags); // spin_unlock(&vop->irq_lock);
+	spin_unlock(&vop->irq_lock);
 
 	/* This is expected for vop iommu irqs, since the irq is shared */
 	if (!active_irqs) {
@@ -4151,6 +4151,23 @@ static irqreturn_t vop_isr(int irq, void *data)
 		active_irqs &= ~(FS_INTR | FS_FIELD_INTR);
 		ret = IRQ_HANDLED;
 	}
+
+#define ERROR_HANDLER(x) \
+	do { \
+		if (active_irqs & x##_INTR) {\
+			DRM_DEV_ERROR_RATELIMITED(vop->dev, #x " irq err\n"); \
+			active_irqs &= ~x##_INTR; \
+			ret = IRQ_HANDLED; \
+		} \
+	} while (0)
+
+	ERROR_HANDLER(BUS_ERROR);
+	ERROR_HANDLER(WIN0_EMPTY);
+	ERROR_HANDLER(WIN1_EMPTY);
+	ERROR_HANDLER(WIN2_EMPTY);
+	ERROR_HANDLER(WIN3_EMPTY);
+	ERROR_HANDLER(HWC_EMPTY);
+	ERROR_HANDLER(POST_BUF_EMPTY);
 
 	/* Unhandled irqs are spurious. */
 	if (active_irqs)
@@ -4352,7 +4369,7 @@ static int vop_create_crtc(struct vop *vop)
 	 */
 	for (i = 0; i < vop->num_wins; i++) {
 		struct vop_win *win = &vop->win[i];
-		unsigned long possible_crtcs = 1 << drm_crtc_index(crtc);
+		unsigned long possible_crtcs = drm_crtc_mask(crtc);
 
 		if (win->type != DRM_PLANE_TYPE_OVERLAY)
 			continue;
@@ -4672,7 +4689,6 @@ static int vop_bind(struct device *dev, struct device *master, void *data)
 	struct drm_device *drm_dev = data;
 	struct vop *vop;
 	struct resource *res;
-	size_t alloc_size;
 	int ret, irq, i;
 	int num_wins = 0;
 	struct device_node *mcu = NULL;
@@ -4691,8 +4707,9 @@ static int vop_bind(struct device *dev, struct device *master, void *data)
 	}
 
 	/* Allocate vop struct and its vop_win array */
-	alloc_size = sizeof(*vop) + sizeof(*vop->win) * num_wins;
-	vop = devm_kzalloc(dev, alloc_size, GFP_KERNEL);
+	//alloc_size = sizeof(*vop) + sizeof(*vop->win) * num_wins;
+	//vop = devm_kzalloc(dev, alloc_size, GFP_KERNEL);
+	vop = devm_kzalloc(dev, struct_size(vop, win, num_wins), GFP_KERNEL);
 	if (!vop)
 		return -ENOMEM;
 
@@ -4793,16 +4810,16 @@ static int vop_bind(struct device *dev, struct device *master, void *data)
 
 	mutex_init(&vop->vsync_mutex);
 
-	ret = devm_request_irq(dev, vop->irq, vop_isr,
-			       IRQF_SHARED, dev_name(dev), vop);
-	if (ret)
-		return ret;
-
 	ret = vop_create_crtc(vop);
 	if (ret)
 		return ret;
 
 	pm_runtime_enable(&pdev->dev);
+
+	ret = devm_request_irq(dev, vop->irq, vop_isr,
+			       IRQF_SHARED, dev_name(dev), vop);
+	if (ret)
+		goto err_disable_pm_runtime;
 
 	of_rockchip_drm_sub_backlight_register(dev, &vop->crtc,
 					       &rockchip_sub_backlight_ops);
@@ -4829,6 +4846,12 @@ static int vop_bind(struct device *dev, struct device *master, void *data)
 	}
 
 	return 0;
+
+err_disable_pm_runtime:
+	pm_runtime_disable(&pdev->dev);
+	vop_destroy_crtc(vop);
+
+	return ret;
 }
 
 static void vop_unbind(struct device *dev, struct device *master, void *data)
