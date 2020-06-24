@@ -599,7 +599,7 @@ static int cdn_dp_get_training_status(struct cdn_dp_device *dp)
 	if (ret)
 		goto err_get_training_status;
 
-	dp->link.rate = status[0];
+	dp->link.rate = drm_dp_bw_code_to_link_rate(status[0]);
 	dp->link.num_lanes = status[1];
 
 err_get_training_status:
@@ -728,7 +728,7 @@ int cdn_dp_tu_size_cal(struct cdn_dp_device *dp, u8 lanes, u8 link_bw)
 	bit_per_pix = (video->color_fmt == YCBCR_4_2_2) ?
 			(video->color_depth * 2) : (video->color_depth * 3);
 
-	link_rate = drm_dp_bw_code_to_link_rate(link_bw) / 1000;
+	link_rate = dp->link.rate / 1000;
 
 	/*
 	 * get a best tu_size and valid symbol:
