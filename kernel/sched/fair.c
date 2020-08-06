@@ -2481,7 +2481,7 @@ void task_tick_numa(struct rq *rq, struct task_struct *curr)
 	/*
 	 * We don't care about NUMA placement if we don't have memory.
 	 */
-	if (!curr->mm || (curr->flags & PF_EXITING) || work->next != work)
+	if ((curr->flags & (PF_EXITING | PF_KTHREAD)) || work->next != work)
 		return;
 
 	/*
@@ -9534,6 +9534,7 @@ static int active_load_balance_cpu_stop(void *data)
 	rcu_read_unlock();
 out_unlock:
 	busiest_rq->active_balance = 0;
+	push_task = busiest_rq->push_task;
 
 	if (push_task)
 		busiest_rq->push_task = NULL;

@@ -1813,6 +1813,8 @@ static int stmmac_open(struct net_device *dev)
 		goto init_error;
 	}
 
+	stmmac_check_ether_addr(priv);
+
 	ret = stmmac_hw_setup(dev, true);
 	if (ret < 0) {
 		pr_err("%s: Hw setup failed\n", __func__);
@@ -2960,8 +2962,6 @@ int stmmac_dvr_probe(struct device *device,
 	ret = stmmac_hw_init(priv);
 	if (ret)
 		goto error_hw_init;
-
-	stmmac_check_ether_addr(priv);
 
 	ndev->netdev_ops = &stmmac_netdev_ops;
 

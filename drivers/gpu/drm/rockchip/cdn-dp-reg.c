@@ -599,7 +599,7 @@ static int cdn_dp_get_training_status(struct cdn_dp_device *dp)
 	if (ret)
 		goto err_get_training_status;
 
-	dp->link.rate = status[0];
+	dp->link.rate = drm_dp_bw_code_to_link_rate(status[0]);
 	dp->link.num_lanes = status[1];
 
 err_get_training_status:
@@ -716,19 +716,28 @@ static int cdn_dp_get_msa_misc(struct video_info *video,
 	return msa_misc;
 }
 
-int cdn_dp_tu_size_cal(struct cdn_dp_device *dp, u8 lanes, u8 link_bw)
+int cdn_dp_config_video(struct cdn_dp_device *dp)
 {
 	struct video_info *video = &dp->video_info;
 	struct drm_display_mode *mode = &dp->mode;
 	u8 bit_per_pix, tu_size_reg = TU_SIZE;
-	u32 link_rate, rem;
+	u32 val, link_rate, rem;
 	u64 symbol;
 	int ret;
 
 	bit_per_pix = (video->color_fmt == YCBCR_4_2_2) ?
-			(video->color_depth * 2) : (video->color_depth * 3);
+		      (video->color_depth * 2) : (video->color_depth * 3);
 
-	link_rate = drm_dp_bw_code_to_link_rate(link_bw) / 1000;
+//	link_rate = dp->link.rate / 1000; // mainline
+	link_rate = drm_dp_bw_code_to_link_rate(dp->link.rate) / 1000;
+
+	ret = cdn_dp_reg_write(dp, BND_HSYNC2VSYNC, VIF_BYPASS_INTERLACE);
+	if (ret)
+		goto err_config_video;
+
+	ret = cdn_dp_reg_write(dp, HSYNC2VSYNC_POL_CTRL, 0);
+	if (ret)
+		goto err_config_video;
 
 	/*
 	 * get a best tu_size and valid symbol:
@@ -740,42 +749,18 @@ int cdn_dp_tu_size_cal(struct cdn_dp_device *dp, u8 lanes, u8 link_bw)
 	do {
 		tu_size_reg += 2;
 		symbol = tu_size_reg * mode->clock * bit_per_pix;
-		do_div(symbol, lanes * link_rate * 8);
+		do_div(symbol, dp->link.num_lanes * link_rate * 8);
 		rem = do_div(symbol, 1000);
 		if (tu_size_reg > 64) {
 			ret = -EINVAL;
-			return ret;
+			DRM_DEV_ERROR(dp->dev,
+				      "tu error, clk:%d, lanes:%d, rate:%d\n",
+				      mode->clock, dp->link.num_lanes,
+				      link_rate);
+			goto err_config_video;
 		}
 	} while ((symbol <= 1) || (tu_size_reg - symbol < 4) ||
 		 (rem > 850) || (rem < 100));
-
-	dp->tu_size = tu_size_reg;
-	dp->tu_symbol = symbol;
-	return 0;
-}
-
-int cdn_dp_config_video(struct cdn_dp_device *dp)
-{
-	struct video_info *video = &dp->video_info;
-	struct drm_display_mode *mode = &dp->mode;
-	u8 tu_size_reg = dp->tu_size;
-	u64 symbol = dp->tu_symbol;
-	u32 val, link_rate;
-	u8 bit_per_pix;
-	int ret;
-
-	bit_per_pix = (video->color_fmt == YCBCR_4_2_2) ?
-		      (video->color_depth * 2) : (video->color_depth * 3);
-
-	link_rate = drm_dp_bw_code_to_link_rate(dp->link.rate) / 1000;
-
-	ret = cdn_dp_reg_write(dp, BND_HSYNC2VSYNC, VIF_BYPASS_INTERLACE);
-	if (ret)
-		goto err_config_video;
-
-	ret = cdn_dp_reg_write(dp, HSYNC2VSYNC_POL_CTRL, 0);
-	if (ret)
-		goto err_config_video;
 
 	val = symbol + (tu_size_reg << 8);
 	val |= TU_CNT_RST_EN;

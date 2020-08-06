@@ -779,14 +779,14 @@ static ssize_t f_acm_port_num_show(struct config_item *item, char *page)
 	return sprintf(page, "%u\n", to_f_serial_opts(item)->port_num);
 }
 
-CONFIGFS_ATTR_RO(f_acm_port_, num);
+CONFIGFS_ATTR_RO(f_acm_, port_num);
 
 static struct configfs_attribute *acm_attrs[] = {
-	&f_acm_port_attr_num,
+	&f_acm_attr_port_num,
 	NULL,
 };
 
-static struct config_item_type acm_func_type = {
+static const struct config_item_type acm_func_type = {
 	.ct_item_ops    = &acm_item_ops,
 	.ct_attrs	= acm_attrs,
 	.ct_owner       = THIS_MODULE,

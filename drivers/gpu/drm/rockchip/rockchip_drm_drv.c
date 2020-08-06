@@ -43,6 +43,7 @@
 #include "rockchip_drm_fb.h"
 #include "rockchip_drm_fbdev.h"
 #include "rockchip_drm_gem.h"
+#include "rockchip_drm_rga.h"
 
 #define DRIVER_NAME	"rockchip"
 #define DRIVER_DESC	"RockChip Soc DRM"
@@ -353,10 +354,10 @@ get_framebuffer_by_node(struct drm_device *drm_dev, struct device_node *node)
 
 	switch (bpp) {
 	case 16:
-		mode_cmd.pixel_format = DRM_FORMAT_BGR565;
+		mode_cmd.pixel_format = DRM_FORMAT_RGB565;
 		break;
 	case 24:
-		mode_cmd.pixel_format = DRM_FORMAT_BGR888;
+		mode_cmd.pixel_format = DRM_FORMAT_RGB888;
 		break;
 	case 32:
 		mode_cmd.pixel_format = DRM_FORMAT_XRGB8888;
@@ -1701,6 +1702,13 @@ static const struct drm_ioctl_desc rockchip_ioctls[] = {
 			  DRM_UNLOCKED | DRM_AUTH | DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(ROCKCHIP_GEM_GET_PHYS, rockchip_gem_get_phys_ioctl,
 			  DRM_UNLOCKED | DRM_AUTH | DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(ROCKCHIP_RGA_GET_VER, rockchip_rga_get_ver_ioctl,
+			  DRM_AUTH | DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(ROCKCHIP_RGA_SET_CMDLIST,
+			  rockchip_rga_set_cmdlist_ioctl,
+			  DRM_AUTH | DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(ROCKCHIP_RGA_EXEC, rockchip_rga_exec_ioctl,
+			  DRM_AUTH | DRM_RENDER_ALLOW),
 };
 
 static const struct file_operations rockchip_drm_driver_fops = {
